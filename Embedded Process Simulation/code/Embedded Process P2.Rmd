@@ -1,0 +1,157 @@
+---
+title: "Embedded Process P2"
+author: "Ren-Yi Wang"
+date: "9/27/2022"
+output: pdf_document
+---
+
+<font size = 4>
+
+## Specifications
+
+Passengers dominates drivers with $L = 5$.
+
+```{r}
+# rm(list=ls())
+library(ggplot2)
+library(HMP) # For the multinomial sampler
+
+d <- 1 # Death rate
+b_0 = 1.15
+mu <- 0.02 # Driver mutation rate
+nu <- 0.3 # Passenger mutation rate
+s_p <- 0.002 # Passenger strength
+L <- 5
+
+# Birth rate as a function of type i
+b <- function(i) {
+  return(b_0*( (1+s_p)^i ))
+}
+```
+
+
+
+## Embedded Process Simulation
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+S = 1700 # Number of simulations
+Gen = c(90,180,270,360) # Number of generations in each simulation
+n = 70
+states = seq(from = (-n), to = (100), by = 1)
+states_len = length(states)
+ext_prob = vector()
+emp_dist = vector()
+pop_size = matrix(rep(0,S*Gen[4]),ncol = Gen[4], nrow = S)
+pop_size[,1] = 1
+
+for (G in Gen){
+  sim_pop = vector()
+  
+  for(s in 1:S){
+    # Initialize the cell population
+    pop = rep(0,states_len)
+    pop[n+1] = 1 # Initialize with a single type 0 cell
+    pop_next_gen = pop
+    record = TRUE # Record the simulation by default
+  
+    for(g in 1:(G-1)){
+    
+      for (i in (1:states_len)){
+      
+        if (pop[i] > 0) {
+          type = states[i] # To get the type/state of cell
+          type_size = pop[i]
+          denom = b(type)+mu+nu+d
+          trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+          trans_prob = trans_prob/sum(trans_prob)
+        
+        
+          if (type_size >= 10^9) {
+            size_div = rep(floor(type_size/30),30)
+            size_div = c(size_div,type_size-sum(size_div))
+            action = Multinomial(Nrs = size_div, probs = trans_prob)
+            action = colSums(action)
+          } else {
+            action = Multinomial(Nrs = type_size, probs = trans_prob)
+          }
+        
+          # Update next generation
+          pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+          pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+          pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+        }
+      }
+    
+      pop = pop_next_gen
+    
+      if (max(pop) == 0){
+        if(G == Gen[4]){
+          pop_size[s,(g+1):G] = 0
+        }
+        record = FALSE # Exclude this simulation
+        break # It means the process becomes extinct
+      } else{
+        if(G == Gen[4]){
+          pop_size[s,(g+1)] = sum(pop)
+        }
+      }
+    }
+  
+    # Update the simulation
+    if (record) {
+      sim_pop = rbind(sim_pop,pop)
+    }
+  }
+  
+  ext_prob = cbind(ext_prob, 1-(nrow(sim_pop)/S))
+  emp_dist = rbind(emp_dist, colSums(sim_pop)/sum(sim_pop))
+}
+
+cl = rainbow(4)
+plot(x=states,y=emp_dist[1,], type = "h", col = cl[1],
+     xlab="Types",ylab="Frequency",main = "Simulated Type Transition for Spec. P2")
+legend("topright", legend=c("90","180","270","360"), col=cl, 
+       lty=rep(1,4), title="Generations")
+for(j in 2:4){
+  lines(x=states,y = emp_dist[j,],col = cl[j], type = "h")
+}
+```
+
+## Dynamics and mean dynamics
+
+```{r}
+ave_pop_size = colSums(pop_size)/nrow(pop_size)
+
+cl = rainbow(S)
+
+plot(x=1:G,y=ave_pop_size, type = "h",
+     xlab="Generations",ylab="Average Population Size",
+     main = "Simulated Mean Dynamics for Spec. P2")
+
+plot(x=1:G,y=pop_size[1,], type = "l", ylim = c(0,max(pop_size)),
+     xlab="Generations",ylab="Population Size",
+     main = "Simulated Dynamics for Spec. P2")
+
+for(j in 2:S){
+  lines(x=1:G,y = pop_size[j,],col = cl[j], type = "l")
+}
+```
+
+
+
+
+## Extinction probability
+
+```{r}
+print(ext_prob)
+```
+
+
+
+
+
+
+

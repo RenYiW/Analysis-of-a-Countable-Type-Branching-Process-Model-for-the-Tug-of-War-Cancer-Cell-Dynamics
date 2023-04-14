@@ -1,0 +1,1497 @@
+---
+title: "Stochastic Dynamics of Two Cancer Models with Deleterious Passenger Mutations"
+author: "Ren-Yi Wang"
+date: "1/8/2022"
+output: html_document
+---
+<font size = 4>
+
+## Setup
+
+```{r}
+# rm(list=ls())
+library(matrixcalc) 
+library(sparsevar)
+library(ggplot2)
+library(HMP) # For the multinomial sampler
+library(pracma) # For accurate matrix inverse
+
+d <- 1 # Death rate
+
+# Birth rate as a function of type i
+b <- function(i) {
+  return(b_0*( (1+s_p)^i ))
+}
+```
+
+## Different Initial Parameters
+
+1. Drivers dominates passengers $(\mu L -\nu > 0)$ with $L = 5$.
+
+```{r}
+b_0 = 1.1
+mu <- 0.011 # Driver mutation rate
+nu <- 0.05 # Passenger mutation rate
+s_p <- 0.002 # Passenger strength
+L <- 5
+```
+
+
+2. Drivers dominates passengers $(\mu L -\nu > 0)$ with $L = 10$.
+
+```{r}
+b_0 <- 1.1 # Initial cancer cell birth rate
+mu <- 0.0051 # Driver mutation rate
+nu <- 0.05 # Passenger mutation rate
+s_p <- 0.002 # Passenger strength
+L <- 10
+```
+
+3. Drivers dominates passengers $(\mu L -\nu > 0)$ with $L = 2$.
+
+```{r}
+b_0 <- 1.1 # Initial cancer cell birth rate
+mu <- 0.0251 # Driver mutation rate
+nu <- 0.05 # Passenger mutation rate
+s_p <- 0.002 # Passenger strength
+L <- 2
+```
+
+4. Passengers dominates drivers $(\frac{\nu}{\mu L}>1)$ with $L = 5$.
+
+```{r}
+b_0 = 1.15
+mu <- 0.02 # Driver mutation rate
+nu <- 0.3 # Passenger mutation rate
+s_p <- 0.002 # Passenger strength
+L <- 5
+```
+
+
+5. Passengers dominates drivers $(\frac{\nu}{\mu L}>1)$ with $L = 10$.
+
+```{r}
+b_0 = 1.15
+mu <- 0.003 # Driver mutation rate
+nu <- 0.3 # Passenger mutation rate
+s_p <- 0.002 # Passenger strength
+L <- 10
+```
+
+6. Passengers dominates drivers $(\frac{\nu}{\mu L}>1)$ with $L = 2$.
+
+```{r}
+b_0 = 1.15
+mu <- 0.055 # Driver mutation rate
+nu <- 0.3 # Passenger mutation rate
+s_p <- 0.002 # Passenger strength
+L <- 2
+```
+
+
+
+
+
+## Embedded Process Simulation
+
+### Simulated Process and Average Fitness 1
+
+$$
+\text{Spec 1: } \mu = 0.011, \nu = 0.05, s_{p} = 0.002, L = 5, b_{0} = 1.1.
+$$
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+S = 1200 # Number of simulations
+Gen = c(100,200,300,400) # Number of generations in each simulation
+n = 30 # -n \leq state \leq nL
+states = seq(from = (-n), to = (n*L), by = 1)
+states_len = length(states)
+ext_prob = vector()
+emp_dist = vector()
+
+for (G in Gen){
+  sim_pop = vector()
+  
+  for(s in 1:S){
+    # Initialize the cell population
+    pop = rep(0,states_len)
+    pop[n+1] = 1 # Initialize with a single type 0 cell
+    pop_next_gen = pop
+    record = TRUE # Record the simulation by default
+  
+    for(g in 1:(G-1)){
+    
+      for (i in (1:states_len)){
+      
+        if (pop[i] > 0) {
+          type = states[i] # To get the type/state of cell
+          type_size = pop[i]
+          denom = b(type)+mu+nu+d
+          trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+          trans_prob = trans_prob/sum(trans_prob)
+        
+        
+          if (type_size >= 10^9) {
+            size_div = rep(floor(type_size/10),10)
+            size_div = c(size_div,type_size-sum(size_div))
+            action = Multinomial(Nrs = size_div, 
+                             probs = trans_prob)
+            action = colSums(action)
+          } else {
+            action = Multinomial(Nrs = type_size, 
+                             probs = trans_prob)
+          }
+        
+          # Update next generation
+          pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+          pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+          pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+        }
+      }
+    
+      pop = pop_next_gen
+    
+      if (max(pop) == 0){
+        record = FALSE # Exclude this simulation
+        break # It means the process becomes extinct
+      }
+    }
+  
+    # Update the simulation
+    if (record) {
+      sim_pop = rbind(sim_pop,pop)
+    }
+  }
+  
+  ext_prob = cbind(ext_prob, 1-(nrow(sim_pop)/S))
+  emp_dist = rbind(emp_dist, colSums(sim_pop)/sum(sim_pop))
+}
+
+ext_prob_1 = ext_prob
+emp_dist_1 = emp_dist
+
+cl = rainbow(4)
+plot(x=states,y=emp_dist_1[1,], type = "h", col = cl[1], ylim = c(0,0.1),
+     xlab="Types",ylab="Frequency",main = "Simulated Type Transition for Spec. D2")
+legend("topright", legend=c("100", "200","300","400"), col=cl, 
+       lty=rep(1,4), title="Generations")
+
+for(j in 2:4){
+  lines(x=states,y = emp_dist_1[j,],col = cl[j], type = "h")
+}
+```
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+S = 1200 # Number of simulations
+G = 400
+n = 30 # -n \leq state \leq nL
+states = seq(from = (-n), to = (n*L), by = 1)
+states_len = length(states)
+ext_prob = vector()
+emp_dist = vector()
+pop_size = matrix(rep(0,S*G),ncol = G, nrow = S)
+pop_size[,1] = 1
+
+  
+for(s in 1:S){
+  # Initialize the cell population
+  pop = rep(0,states_len)
+  pop[n+1] = 1 # Initialize with a single type 0 cell
+  pop_next_gen = pop
+
+  for(g in 2:G){
+    
+    for (i in (1:states_len)){
+      
+      if (pop[i] > 0) {
+        type = states[i] # To get the type/state of cell
+        type_size = pop[i]
+        denom = b(type)+mu+nu+d
+        trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+        trans_prob = trans_prob/sum(trans_prob)
+        
+        
+        if (type_size >= 10^9) {
+          size_div = rep(floor(type_size/10),10)
+          size_div = c(size_div,type_size-sum(size_div))
+          action = Multinomial(Nrs = size_div, 
+                           probs = trans_prob)
+          action = colSums(action)
+        } else {
+          action = Multinomial(Nrs = type_size, 
+                             probs = trans_prob)
+        }
+        
+        # Update next generation
+        pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+        pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+        pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+      }
+    }
+  
+    pop = pop_next_gen
+    
+    if (max(pop) == 0){
+      pop_size[s,g:G] = 0
+      break # It means the process becomes extinct
+    } else {
+      pop_size[s,g] = sum(pop)
+    }
+  }
+}
+
+pop_size_1 = pop_size
+ave_pop_size_1 = colSums(pop_size_1)/ncol(pop_size_1)
+
+plot(x=1:G,y=ave_pop_size_1, type = "h",
+     xlab="Generations",ylab="Average Population Size",
+     main = "Simulated Mean Dynamics for Spec. D2")
+
+cl = rainbow(S)
+plot(x=1:G,y=pop_size[1,], type = "l", ylim = c(min(pop_size),max(pop_size)),
+     xlab="Generations",ylab="Population Size",
+     main = "Simulated Dynamics for Spec. D2")
+
+for(j in 2:S){
+  lines(x=1:G,y = pop_size[j,],col = cl[j], type = "l")
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+set.seed(210)
+
+# Average fitness in each generation
+ave_fit = matrix(rep(0,S*G),nrow = S); ave_fit[,1] = rep(b_0,S)
+ave_fit_index = 1 # Increase if the population survives
+fit_weight = b_0*((1+s_p)^states)
+
+for(s in 1:S){
+  # Initialize the cell population
+  pop = rep(0,states_len)
+  pop[n+1] = 1 # Initialize with a single type 0 cell
+  
+  pop_next_gen = pop
+  
+  for(g in 1:(G-1)){
+    
+    for (i in (1:states_len)){
+      
+      if (pop[i] > 0) {
+        type = states[i] # To get the type/state of cell
+        type_size = pop[i]
+        denom = b(type)+mu+nu+d
+        trans_prob = c(b(type)/denom,mu/denom,nu/denom,d/denom)
+        trans_prob = trans_prob/sum(trans_prob)
+        
+        
+        if (type_size >= 10^9) {
+          size_div = rep(floor(type_size/3),3)
+          size_div = c(size_div,type_size-sum(size_div))
+          action = Multinomial(Nrs = size_div, 
+                             probs=trans_prob)
+          action = colSums(action)
+        } else {
+          action = Multinomial(Nrs = type_size, 
+                             probs=trans_prob)
+        }
+      
+        
+        # Update next generation
+        pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+        pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+        pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+      }
+    }
+    
+    pop = pop_next_gen
+    
+    if (max(pop) == 0){
+      ave_fit = ave_fit[-ave_fit_index,]
+      break # It means the process becomes extinct
+    } 
+    
+    ave_fit[ave_fit_index,g+1] = sum(fit_weight*pop)/sum(pop)
+    
+    if (g == (G-1)){
+      ave_fit_index = ave_fit_index + 1
+    }
+  }
+}
+
+ave_fit_1 = ave_fit
+
+cl <- rainbow(nrow(ave_fit_1))
+plot(x=(1:ncol(ave_fit_1)),y=ave_fit_1[1,], type = "l",
+     xlab="Generation",ylab="Average Fitness",
+     ylim=c(min(ave_fit_1),max(ave_fit_1)), main = "Average Fitness for Spec. D2")
+
+for(j in 2:nrow(ave_fit_1)) {
+  lines((1:ncol(ave_fit_1)), ave_fit_1[j,], col = cl[j], lwd=1)
+}
+
+# Expected average fitness
+E_ave_fit_1 = colSums(ave_fit_1)/nrow(ave_fit_1)
+succ_ratio_1 = data.frame(Generation = (1:(length(E_ave_fit_1)-1)),
+                         Ratio = E_ave_fit_1[2:400]/E_ave_fit_1[1:399])
+
+gen_vs_succ_ratio_1 = ggplot(succ_ratio_1, aes(x=Generation, y=Ratio)) + 
+  geom_point() + xlab("Generations")+ylab("Ratio") +
+  ggtitle("Successive Ratio for Spec. D2")
+gen_vs_succ_ratio_1
+```
+
+
+
+
+
+
+
+
+### Simulated Process and Average Fitness 2
+
+$$
+\text{Spec 2: } b_{0} = 1.1, \mu = 0.0051, \nu = 0.05, s_{p} = 0.002, L = 10.
+$$
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+S = 1200 # Number of simulations
+Gen = c(90,180,270,360) # Number of generations in each simulation
+n = 20 # -n \leq state \leq nL
+states = seq(from = (-n), to = (n*L), by = 1)
+states_len = length(states)
+ext_prob = vector()
+emp_dist = vector()
+
+
+for (G in Gen){
+  sim_pop = vector()
+  
+  for(s in 1:S){
+    # Initialize the cell population
+    pop = rep(0,states_len)
+    pop[n+1] = 1 # Initialize with a single type 0 cell
+    pop_next_gen = pop
+    record = TRUE # Record the simulation by default
+  
+    for(g in 1:(G-1)){
+    
+      for (i in (1:states_len)){
+      
+        if (pop[i] > 0) {
+          type = states[i] # To get the type/state of cell
+          type_size = pop[i]
+          denom = b(type)+mu+nu+d
+          trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+          trans_prob = trans_prob/sum(trans_prob)
+        
+        
+          if (type_size >= 10^9) {
+            size_div = rep(floor(type_size/10),10)
+            size_div = c(size_div,type_size-sum(size_div))
+            action = Multinomial(Nrs = size_div, 
+                             probs = trans_prob)
+            action = colSums(action)
+          } else {
+            action = Multinomial(Nrs = type_size, 
+                             probs = trans_prob)
+          }
+        
+          # Update next generation
+          pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+          pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+          pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+        }
+      }
+    
+      pop = pop_next_gen
+    
+      if (max(pop) == 0){
+        record = FALSE # Exclude this simulation
+        break # It means the process becomes extinct
+      }
+    }
+  
+    # Update the simulation
+    if (record) {
+      sim_pop = rbind(sim_pop,pop)
+    }
+  }
+  
+  ext_prob = cbind(ext_prob, 1-(nrow(sim_pop)/S))
+  emp_dist = rbind(emp_dist, colSums(sim_pop)/sum(sim_pop))
+}
+
+ext_prob_2 = ext_prob
+emp_dist_2 = emp_dist
+
+cl = rainbow(4)
+plot(x=states,y=emp_dist_2[1,], type = "h", col = cl[1], ylim = c(0,0.1),
+     xlab="Types",ylab="Frequency",main = "Simulated Type Transition for Spec. D3")
+legend("topright", legend=c("90","180","270","360"), col=cl, 
+       lty=rep(1,4), title="Generations")
+
+for(j in 2:4){
+  lines(x=states,y = emp_dist_2[j,],col = cl[j], type = "h")
+}
+```
+
+
+
+```{r}
+set.seed(210)
+
+# Simulation spec
+fit_weight = b_0*((1+s_p)^states)
+
+# Average fitness in each generation
+ave_fit = matrix(rep(0,S*G),nrow = S); ave_fit[,1] = rep(b_0,S)
+ave_fit_index = 1 # Increase if the population survives
+
+for(s in 1:S){
+  # Initialize the cell population
+  pop = rep(0,states_len)
+  pop[n+1] = 1 # Initialize with a single type 0 cell
+  
+  pop_next_gen = pop
+  
+  for(g in 1:(G-1)){
+    
+    for (i in (1:states_len)){
+      
+      if (pop[i] > 0) {
+        type = states[i] # To get the type/state of cell
+        type_size = pop[i]
+        denom = b(type)+mu+nu+d
+        trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+        trans_prob = trans_prob/sum(trans_prob)
+        
+        
+        if (type_size >= 10^9) {
+          size_div = rep(floor(type_size/10),10)
+          size_div = c(size_div,type_size-sum(size_div))
+          action = Multinomial(Nrs = size_div, probs = trans_prob)
+          action = colSums(action)
+        } else {
+          action = Multinomial(Nrs = type_size, probs = trans_prob)
+        }
+      
+        
+        # Update next generation
+        pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+        pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+        pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+      }
+    }
+    
+    pop = pop_next_gen
+    
+    if (max(pop) == 0){
+      ave_fit = ave_fit[-ave_fit_index,]
+      break # It means the process becomes extinct
+    } 
+    
+    ave_fit[ave_fit_index,g+1] = sum(fit_weight*pop)/sum(pop)
+    
+    if (g == (G-1)){
+      ave_fit_index = ave_fit_index + 1
+    }
+  }
+}
+
+ave_fit_2 = ave_fit
+
+cl <- rainbow(nrow(ave_fit_2))
+plot(x=(1:G),y=ave_fit_2[1,], type = "l",
+     xlab="Generation",ylab="Average Fitness",
+     ylim=c(min(ave_fit_2),max(ave_fit_2)), main = "Average Fitness for Spec. D3")
+
+for(j in 2:nrow(ave_fit_2)) {
+  lines((1:G), ave_fit_2[j,], col = cl[j], lwd=1)
+}
+
+
+
+# Expected average fitness
+E_ave_fit_2 = colSums(ave_fit_2)/nrow(ave_fit_2)
+succ_ratio_2 = data.frame(Generation = (1:(length(E_ave_fit_2)-1)),
+                         Ratio = E_ave_fit_2[2:360]/E_ave_fit_2[1:359])
+
+gen_vs_succ_ratio_2 = ggplot(succ_ratio_2, aes(x=Generation, y=Ratio)) + 
+  geom_point() + xlab("Generations")+ylab("Ratio") +
+  ggtitle("Successive Ratio for Spec. D3")
+gen_vs_succ_ratio_2
+```
+
+### Simulated Process and Average Fitness 3
+
+$$
+\text{Spec 3: } b_{0} = 1.1, \mu = 0.0251, \nu = 0.05, s_{p} = 0.002, L = 2.
+$$
+
+```{r}
+set.seed(128)
+
+# Simulation spec
+S = 1500 # Number of simulations
+Gen = c(100,200,300,400) # Number of generations in each simulation
+n = 30 # -n \leq state \leq nL
+states = seq(from = (-n), to = (n*L), by = 1)
+states_len = length(states)
+ext_prob = vector()
+emp_dist = vector()
+
+for (G in Gen){
+  sim_pop = vector()
+  
+  for(s in 1:S){
+    # Initialize the cell population
+    pop = rep(0,states_len)
+    pop[n+1] = 1 # Initialize with a single type 0 cell
+    pop_next_gen = pop
+    record = TRUE # Record the simulation by default
+  
+    for(g in 1:(G-1)){
+    
+      for (i in (1:states_len)){
+      
+        if (pop[i] > 0) {
+          type = states[i] # To get the type/state of cell
+          type_size = pop[i]
+          denom = b(type)+mu+nu+d
+          trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+          trans_prob = trans_prob/sum(trans_prob)
+        
+        
+          if (type_size >= 10^9) {
+            size_div = rep(floor(type_size/10),10)
+            size_div = c(size_div,type_size-sum(size_div))
+            action = Multinomial(Nrs = size_div, probs = trans_prob)
+            action = colSums(action)
+          } else {
+            action = Multinomial(Nrs = type_size, probs = trans_prob)
+          }
+        
+          # Update next generation
+          pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+          pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+          pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+        }
+      }
+    
+      pop = pop_next_gen
+    
+      if (max(pop) == 0){
+        record = FALSE # Exclude this simulation
+        break # It means the process becomes extinct
+      }
+    }
+  
+    # Update the simulation
+    if (record) {
+      sim_pop = rbind(sim_pop,pop)
+    }
+  }
+  
+  ext_prob = cbind(ext_prob, 1-(nrow(sim_pop)/S))
+  emp_dist = rbind(emp_dist, colSums(sim_pop)/sum(sim_pop))
+}
+
+ext_prob_3 = ext_prob
+emp_dist_3 = emp_dist
+
+cl = rainbow(4)
+plot(x=states,y=emp_dist_3[1,], type = "h", col = cl[1],
+     xlab="Types",ylab="Frequency",main = "Simulated Type Transition for Spec. D1")
+legend("topright", legend=c("100", "200","300","400"), col=cl, 
+       lty=rep(1,4), title="Generations")
+
+for(j in 2:4){
+  lines(x=states,y = emp_dist_3[j,],col = cl[j], type = "h")
+}
+```
+
+
+
+```{r}
+set.seed(128)
+
+# Simulation spec
+fit_weight = b_0*((1+s_p)^states)
+
+# Average fitness in each generation
+ave_fit = matrix(rep(0,S*G),nrow = S); ave_fit[,1] = rep(b_0,S)
+ave_fit_index = 1 # Increase if the population survives
+
+for(s in 1:S){
+  # Initialize the cell population
+  pop = rep(0,states_len)
+  pop[n+1] = 1 # Initialize with a single type 0 cell
+  
+  pop_next_gen = pop
+  
+  for(g in 1:(G-1)){
+    
+    for (i in (1:states_len)){
+      
+      if (pop[i] > 0) {
+        type = states[i] # To get the type/state of cell
+        type_size = pop[i]
+        denom = b(type)+mu+nu+d
+        trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+        trans_prob = trans_prob/sum(trans_prob)
+        
+        
+        if (type_size >= 10^9) {
+          size_div = rep(floor(type_size/10),10)
+          size_div = c(size_div,type_size-sum(size_div))
+          action = Multinomial(Nrs = size_div, probs = trans_prob)
+          action = colSums(action)
+        } else {
+          action = Multinomial(Nrs = type_size, probs = trans_prob)
+        }
+      
+        
+        # Update next generation
+        pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+        pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+        pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+      }
+    }
+    
+    pop = pop_next_gen
+    
+    if (max(pop) == 0){
+      ave_fit = ave_fit[-ave_fit_index,]
+      break # It means the process becomes extinct
+    } 
+    
+    ave_fit[ave_fit_index,g+1] = sum(fit_weight*pop)/sum(pop)
+    
+    if (g == (G-1)){
+      ave_fit_index = ave_fit_index + 1
+    }
+  }
+}
+
+ave_fit_3 = ave_fit
+
+cl <- rainbow(nrow(ave_fit_3))
+plot(x=(1:G),y=ave_fit_3[1,], type = "l",
+     xlab="Generation",ylab="Average Fitness",
+     ylim=c(min(ave_fit_3),max(ave_fit_3)), main = "Average Fitness for Spec. D1")
+
+for(j in 2:nrow(ave_fit)) {
+  lines((1:G), ave_fit[j,], col = cl[j], lwd=1)
+}
+
+
+# Expected average fitness
+E_ave_fit_3 = colSums(ave_fit_3)/nrow(ave_fit_3)
+succ_ratio_3 = data.frame(Generation = (1:(length(E_ave_fit_3)-1)),
+                         Ratio = E_ave_fit_3[2:400]/E_ave_fit_3[1:399])
+
+gen_vs_succ_ratio_3 = ggplot(succ_ratio_3, aes(x=Generation, y=Ratio)) + 
+  geom_point() + xlab("Generations")+ylab("Ratio") +
+  ggtitle("Successive Ratio for Spec. D1")
+gen_vs_succ_ratio_3
+```
+
+
+
+
+### Simulated Process and Average Fitness 4
+
+$$
+\text{Spec 4: } b_{0} = 1.15, \mu = 0.02, \nu = 0.3, s_{p} = 0.002, L = 5.
+$$
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+S = 1600 # Number of simulations
+Gen = c(90,180,270,360) # Number of generations in each simulation
+n = 70
+states = seq(from = (-n), to = (100), by = 1)
+states_len = length(states)
+ext_prob = vector()
+emp_dist = vector()
+
+for (G in Gen){
+  sim_pop = vector()
+  
+  for(s in 1:S){
+    # Initialize the cell population
+    pop = rep(0,states_len)
+    pop[n+1] = 1 # Initialize with a single type 0 cell
+    pop_next_gen = pop
+    record = TRUE # Record the simulation by default
+  
+    for(g in 1:(G-1)){
+    
+      for (i in (1:states_len)){
+      
+        if (pop[i] > 0) {
+          type = states[i] # To get the type/state of cell
+          type_size = pop[i]
+          denom = b(type)+mu+nu+d
+          trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+          trans_prob = trans_prob/sum(trans_prob)
+        
+        
+          if (type_size >= 10^9) {
+            size_div = rep(floor(type_size/30),30)
+            size_div = c(size_div,type_size-sum(size_div))
+            action = Multinomial(Nrs = size_div, probs = trans_prob)
+            action = colSums(action)
+          } else {
+            action = Multinomial(Nrs = type_size, probs = trans_prob)
+          }
+        
+          # Update next generation
+          pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+          pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+          pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+        }
+      }
+    
+      pop = pop_next_gen
+    
+      if (max(pop) == 0){
+        record = FALSE # Exclude this simulation
+        break # It means the process becomes extinct
+      }
+    }
+  
+    # Update the simulation
+    if (record) {
+      sim_pop = rbind(sim_pop,pop)
+    }
+  }
+  
+  ext_prob = cbind(ext_prob, 1-(nrow(sim_pop)/S))
+  emp_dist = rbind(emp_dist, colSums(sim_pop)/sum(sim_pop))
+}
+
+ext_prob_4 = ext_prob
+emp_dist_4 = emp_dist
+
+cl = rainbow(4)
+plot(x=states,y=emp_dist_4[1,], type = "h", col = cl[1],
+     xlab="Types",ylab="Frequency",main = "Simulated Type Transition for Spec. P2")
+legend("topright", legend=c("90", "180","270","360"), col=cl, 
+       lty=rep(1,4), title="Generations")
+
+for(j in 2:4){
+  lines(x=states,y = emp_dist_4[j,],col = cl[j], type = "h")
+}
+```
+
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+G = 360
+pop_size = matrix(rep(0,S*G),ncol = G, nrow = S)
+pop_size[,1] = 1
+
+  
+for(s in 1:S){
+  # Initialize the cell population
+  pop = rep(0,states_len)
+  pop[n+1] = 1 # Initialize with a single type 0 cell
+  pop_next_gen = pop
+
+  for(g in 2:G){
+    
+    for (i in (1:states_len)){
+      
+      if (pop[i] > 0) {
+        type = states[i] # To get the type/state of cell
+        type_size = pop[i]
+        denom = b(type)+mu+nu+d
+        trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+        trans_prob = trans_prob/sum(trans_prob)
+        
+        
+        if (type_size >= 10^9) {
+          size_div = rep(floor(type_size/30),30)
+          size_div = c(size_div,type_size-sum(size_div))
+          action = Multinomial(Nrs = size_div, 
+                           probs = trans_prob)
+          action = colSums(action)
+        } else {
+          action = Multinomial(Nrs = type_size, 
+                             probs = trans_prob)
+        }
+        
+        # Update next generation
+        pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+        pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+        pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+      }
+    }
+  
+    pop = pop_next_gen
+    
+    if (max(pop) == 0){
+      pop_size[s,g:G] = 0
+      break # It means the process becomes extinct
+    } else {
+      pop_size[s,g] = sum(pop)
+    }
+  }
+}
+  
+pop_size_4 = pop_size
+ave_pop_size_4 = colSums(pop_size_4)/ncol(pop_size_4)
+
+plot(x=1:G,y=ave_pop_size_4, type = "h",
+     xlab="Generations",ylab="Average Population Size",
+     main = "Simulated Mean Dynamics for Spec. P2")
+
+cl = rainbow(S)
+plot(x=1:360,y=pop_size_4[1,], type = "l", ylim = c(min(pop_size_4),max(pop_size_4)),
+     xlab="Generations",ylab="Population Size",
+     main = "Simulated Dynamics for Spec. P2")
+
+for(j in 2:S){
+  lines(x=1:360,y = pop_size_4[j,],col = cl[j], type = "l")
+}
+```
+
+
+
+
+
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+fit_weight = b_0*((1+s_p)^states)
+
+# Average fitness in each generation
+ave_fit = matrix(rep(0,S*G),nrow = S); ave_fit[,1] = rep(b_0,S)
+ave_fit_index = 1 # Increase if the population survives
+
+for(s in 1:S){
+  # Initialize the cell population
+  pop = rep(0,states_len)
+  pop[n+1] = 1 # Initialize with a single type 0 cell
+  
+  pop_next_gen = pop
+  
+  for(g in 1:(G-1)){
+    
+    for (i in (1:states_len)){
+      
+      if (pop[i] > 0) {
+        type = states[i] # To get the type/state of cell
+        type_size = pop[i]
+        denom = b(type)+mu+nu+d
+        trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+        trans_prob = trans_prob/sum(trans_prob)
+        
+        
+        if (type_size >= 10^9) {
+          size_div = rep(floor(type_size/30),30)
+          size_div = c(size_div,type_size-sum(size_div))
+          action = Multinomial(Nrs = size_div, probs = trans_prob)
+          action = colSums(action)
+        } else {
+          action = Multinomial(Nrs = type_size, probs = trans_prob)
+        }
+      
+        
+        # Update next generation
+        pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+        pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+        pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+      }
+    }
+    
+    pop = pop_next_gen
+    
+    if (max(pop) == 0){
+      ave_fit = ave_fit[-ave_fit_index,]
+      break # It means the process becomes extinct
+    } 
+    
+    ave_fit[ave_fit_index,g+1] = sum(fit_weight*pop)/sum(pop)
+    
+    if (g == (G-1)){
+      ave_fit_index = ave_fit_index + 1
+    }
+  }
+}
+
+ave_fit_4 = ave_fit
+
+cl <- rainbow(nrow(ave_fit_4))
+plot(x=(1:G),y=ave_fit_4[1,], type = "l",
+     xlab="Generation",ylab="Average Fitness",
+     ylim=c(min(ave_fit_4),max(ave_fit_4)), main = "Average Fitness for Spec. P2")
+
+for(j in 2:nrow(ave_fit_4)) {
+  lines((1:G), ave_fit_4[j,], col = cl[j], lwd=1)
+}
+
+# Expected average fitness
+E_ave_fit_4 = colSums(ave_fit_4)/nrow(ave_fit_4)
+succ_ratio_4 = data.frame(Generation = (1:(length(E_ave_fit_4)-1)),
+                         Ratio = E_ave_fit_4[2:360]/E_ave_fit_4[1:359])
+
+gen_vs_succ_ratio_4 = ggplot(succ_ratio_4, aes(x=Generation, y=Ratio)) + 
+  geom_point() + xlab("Generations")+ylab("Ratio") +
+  ggtitle("Successive Ratio for Spec. P2")
+gen_vs_succ_ratio_4
+```
+
+
+
+
+
+
+### Simulated Process and Average Fitness 5
+
+$$
+\text{Spec 5: } b_{0} = 1.15, \mu = 0.003, \nu = 0.3, s_{p} = 0.002, L = 10.
+$$
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+S = 1000 # Number of simulations
+Gen = c(75,150,225,300) # Number of generations in each simulation
+n = 90
+states = seq(from = (-n), to = 100, by = 1)
+states_len = length(states)
+ext_prob = vector()
+emp_dist = vector()
+
+for (G in Gen){
+  sim_pop = vector()
+  
+  for(s in 1:S){
+    # Initialize the cell population
+    pop = rep(0,states_len)
+    pop[n+1] = 1 # Initialize with a single type 0 cell
+    pop_next_gen = pop
+    record = TRUE # Record the simulation by default
+  
+    for(g in 1:(G-1)){
+    
+      for (i in (1:states_len)){
+      
+        if (pop[i] > 0) {
+          type = states[i] # To get the type/state of cell
+          type_size = pop[i]
+          denom = b(type)+mu+nu+d
+          trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+          trans_prob = trans_prob/sum(trans_prob)
+        
+        
+          if (type_size >= 10^9) {
+            size_div = rep(floor(type_size/30),30)
+            size_div = c(size_div,type_size-sum(size_div))
+            action = Multinomial(Nrs = size_div, probs = trans_prob)
+            action = colSums(action)
+          } else {
+            action = Multinomial(Nrs = type_size, probs = trans_prob)
+          }
+        
+          # Update next generation
+          pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+          pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+          pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+        }
+      }
+    
+      pop = pop_next_gen
+    
+      if (max(pop) == 0){
+        record = FALSE # Exclude this simulation
+        break # It means the process becomes extinct
+      }
+    }
+  
+    # Update the simulation
+    if (record) {
+      sim_pop = rbind(sim_pop,pop)
+    }
+  }
+  
+  ext_prob = cbind(ext_prob, 1-(nrow(sim_pop)/S))
+  emp_dist = rbind(emp_dist, colSums(sim_pop)/sum(sim_pop))
+}
+
+ext_prob_5 = ext_prob
+emp_dist_5 = emp_dist
+
+cl = rainbow(4)
+plot(x=states,y=emp_dist_5[1,], type = "h", col = cl[1], ylim = c(0,0.13),
+     xlab="Types",ylab="Frequency",main = "Simulated Type Transition for Spec. P3")
+legend("topright", legend=c("75", "150","225","300"), col=cl, 
+       lty=rep(1,4), title="Generations")
+
+for(j in 2:4){
+  lines(x=states,y = emp_dist_5[j,],col = cl[j], type = "h")
+}
+```
+
+
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+fit_weight = b_0*((1+s_p)^states)
+
+# Average fitness in each generation
+ave_fit = matrix(rep(0,S*G),nrow = S); ave_fit[,1] = rep(b_0,S)
+ave_fit_index = 1 # Increase if the population survives
+
+for(s in 1:S){
+  # Initialize the cell population
+  pop = rep(0,states_len)
+  pop[n+1] = 1 # Initialize with a single type 0 cell
+  
+  pop_next_gen = pop
+  
+  for(g in 1:(G-1)){
+    
+    for (i in (1:states_len)){
+      
+      if (pop[i] > 0) {
+        type = states[i] # To get the type/state of cell
+        type_size = pop[i]
+        denom = b(type)+mu+nu+d
+        trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+        trans_prob = trans_prob/sum(trans_prob)
+        
+        
+        if (type_size >= 10^9) {
+          size_div = rep(floor(type_size/30),30)
+          size_div = c(size_div,type_size-sum(size_div))
+          action = Multinomial(Nrs = size_div, probs = trans_prob)
+          action = colSums(action)
+        } else {
+          action = Multinomial(Nrs = type_size, probs = trans_prob)
+        }
+      
+        
+        # Update next generation
+        pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+        pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+        pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+      }
+    }
+    
+    pop = pop_next_gen
+    
+    if (max(pop) == 0){
+      ave_fit = ave_fit[-ave_fit_index,]
+      break # It means the process becomes extinct
+    } 
+    
+    ave_fit[ave_fit_index,g+1] = sum(fit_weight*pop)/sum(pop)
+    
+    if (g == (G-1)){
+      ave_fit_index = ave_fit_index + 1
+    }
+  }
+}
+
+ave_fit_5 = ave_fit
+
+cl <- rainbow(nrow(ave_fit_5))
+plot(x=(1:G),y=ave_fit_5[1,], type = "l",
+     xlab="Generation",ylab="Average Fitness",
+     ylim=c(min(ave_fit_5),max(ave_fit_5)), main = "Average Fitness for Spec. P3")
+
+for(j in 2:nrow(ave_fit_5)) {
+  lines((1:G), ave_fit_5[j,], col = cl[j], lwd=1)
+}
+
+
+# Expected average fitness
+E_ave_fit_5 = colSums(ave_fit_5)/nrow(ave_fit_5)
+succ_ratio_5 = data.frame(Generation = (1:(length(E_ave_fit_5)-1)),
+                         Ratio = E_ave_fit_5[2:300]/E_ave_fit_5[1:299])
+
+gen_vs_succ_ratio_5 = ggplot(succ_ratio_5, aes(x=Generation, y=Ratio)) + 
+  geom_point() + xlab("Generations")+ylab("Ratio") +
+  ggtitle("Successive Ratio for Spec. P3")
+gen_vs_succ_ratio_5
+```
+
+
+
+
+
+
+
+
+
+
+### Simulated Process and Average Fitness 6
+
+$$
+\text{Spec 6: } b_{0} = 1.15, \mu = 0.055, \nu = 0.3, s_{p} = 0.002, L = 2.
+$$
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+S = 1200 # Number of simulations
+Gen = c(120,240,360,480) # Number of generations in each simulation
+n = 90
+states = seq(from = (-n), to = 100, by = 1)
+states_len = length(states)
+ext_prob = vector()
+emp_dist = vector()
+
+for (G in Gen){
+  sim_pop = vector()
+  
+  for(s in 1:S){
+    # Initialize the cell population
+    pop = rep(0,states_len)
+    pop[n+1] = 1 # Initialize with a single type 0 cell
+    pop_next_gen = pop
+    record = TRUE # Record the simulation by default
+  
+    for(g in 1:(G-1)){
+    
+      for (i in (1:states_len)){
+      
+        if (pop[i] > 0) {
+          type = states[i] # To get the type/state of cell
+          type_size = pop[i]
+          denom = b(type)+mu+nu+d
+          trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+          trans_prob = trans_prob/sum(trans_prob)
+        
+        
+          if (type_size >= 10^9) {
+            size_div = rep(floor(type_size/30),30)
+            size_div = c(size_div,type_size-sum(size_div))
+            action = Multinomial(Nrs = size_div, probs = trans_prob)
+            action = colSums(action)
+          } else {
+            action = Multinomial(Nrs = type_size, probs = trans_prob)
+          }
+        
+          # Update next generation
+          pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+          pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+          pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+        }
+      }
+    
+      pop = pop_next_gen
+    
+      if (max(pop) == 0){
+        record = FALSE # Exclude this simulation
+        break # It means the process becomes extinct
+      }
+    }
+  
+    # Update the simulation
+    if (record) {
+      sim_pop = rbind(sim_pop,pop)
+    }
+  }
+  
+  ext_prob = cbind(ext_prob, 1-(nrow(sim_pop)/S))
+  emp_dist = rbind(emp_dist, colSums(sim_pop)/sum(sim_pop))
+}
+
+ext_prob_6 = ext_prob
+emp_dist_6 = emp_dist
+
+cl = rainbow(4)
+plot(x=states,y=emp_dist_6[1,], type = "h", col = cl[1], ylim = c(0,0.1),
+     xlab="Types",ylab="Frequency",main = "Simulated Type Transition for Spec. P1")
+legend("topright", legend=c("120", "240","360","480"), col=cl, 
+       lty=rep(1,4), title="Generations")
+
+for(j in 2:4){
+  lines(x=states,y = emp_dist_6[j,],col = cl[j], type = "h")
+}
+```
+
+
+
+```{r}
+set.seed(105)
+
+# Simulation spec
+fit_weight = b_0*((1+s_p)^states)
+
+# Average fitness in each generation
+ave_fit = matrix(rep(0,S*G),nrow = S); ave_fit[,1] = rep(b_0,S)
+ave_fit_index = 1 # Increase if the population survives
+
+for(s in 1:S){
+  # Initialize the cell population
+  pop = rep(0,states_len)
+  pop[n+1] = 1 # Initialize with a single type 0 cell
+  
+  pop_next_gen = pop
+  
+  for(g in 1:(G-1)){
+    
+    for (i in (1:states_len)){
+      
+      if (pop[i] > 0) {
+        type = states[i] # To get the type/state of cell
+        type_size = pop[i]
+        denom = b(type)+mu+nu+d
+        trans_prob = c((b(type)/denom), mu/denom, nu/denom, d/denom)
+        trans_prob = trans_prob/sum(trans_prob)
+        
+        
+        if (type_size >= 10^9) {
+          size_div = rep(floor(type_size/30),30)
+          size_div = c(size_div,type_size-sum(size_div))
+          action = Multinomial(Nrs = size_div, probs = trans_prob)
+          action = colSums(action)
+        } else {
+          action = Multinomial(Nrs = type_size, probs = trans_prob)
+        }
+      
+        
+        # Update next generation
+        pop_next_gen[i] = pop_next_gen[i] - type_size + (2*action[1])
+        pop_next_gen[i-1] = pop_next_gen[i-1] + action[3]
+        pop_next_gen[i+L] = pop_next_gen[i+L] + action[2]
+      }
+    }
+    
+    pop = pop_next_gen
+    
+    if (max(pop) == 0){
+      ave_fit = ave_fit[-ave_fit_index,]
+      break # It means the process becomes extinct
+    } 
+    
+    ave_fit[ave_fit_index,g+1] = sum(fit_weight*pop)/sum(pop)
+    
+    if (g == (G-1)){
+      ave_fit_index = ave_fit_index + 1
+    }
+  }
+}
+
+ave_fit_6 = ave_fit
+
+cl <- rainbow(nrow(ave_fit))
+plot(x=(1:G),y=ave_fit[1,], type = "l",
+     xlab="Generation",ylab="Average Fitness",
+     ylim=c(min(ave_fit),max(ave_fit)), main = "Average Fitness for Spec. P1")
+
+for(j in 2:nrow(ave_fit)) {
+  lines((1:G), ave_fit[j,], col = cl[j], lwd=1)
+}
+
+# Expected average fitness
+E_ave_fit_6 = colSums(ave_fit_6)/nrow(ave_fit_6)
+succ_ratio_6 = data.frame(Generation = (1:(length(E_ave_fit_6)-1)),
+                         Ratio = E_ave_fit_6[2:480]/E_ave_fit_6[1:479])
+
+gen_vs_succ_ratio_6 = ggplot(succ_ratio_6, aes(x=Generation, y=Ratio)) + 
+  geom_point() + xlab("Generations")+ylab("Ratio") +
+  ggtitle("Successive Ratio for Spec. P1")
+gen_vs_succ_ratio_6
+```
+
+
+
+
+
+
+
+
+## Type Transition Matrix Computation
+
+The $[-N,N]$ truncation of $T$ is denoted by $T^{[N]} \in \mathbb{R}^{(2N+1)\times(2n+1)}$.
+
+```{r}
+type_vs_ext_6 = read.csv("type_vs_ext_6.csv")
+q = type_vs_ext_6$ext_prob
+p = 1-q
+N = (length(q)-1)/2
+
+T_mat = matrix(rep(0,(2*N+1)^2),nrow = 2*N+1)
+states = seq(from = -N, to = N, by = 1)
+
+for (i in states) {
+  bi = b(i)
+  denom = bi+mu+nu+d
+  index = i+N+1 # The row index of T and index of q
+  T_mat[index,index] = (bi/denom)*(1+q[index])
+  
+  if (i == (-N)) {
+    T_mat[index,index+L] = (mu/denom)*p[index+L]/p[index]
+  } else if (i > N-L) {
+    T_mat[index,index-1] = (nu/denom)*p[index-1]/p[index]
+  } else {
+    T_mat[index,index-1] = (nu/denom)*p[index-1]/p[index]
+    T_mat[index,index+L] = (mu/denom)*p[index+L]/p[index]
+  }
+}
+
+for (i in 1:nrow(T_mat)){
+  T_mat[i,] = T_mat[i,]/sum(T_mat[i,])
+}
+
+
+states = states[(1+L):(2*N+1-L)]
+T_mat = T_mat[(1+L):(2*N+1-L),(1+L):(2*N+1-L)]
+
+T_hat = diag(nrow(T_mat))-(T_mat)
+c = vector()
+
+for (i in 1:(nrow(T_hat))) {
+  c[i] = abs(det(T_hat[-i,-(150)]))
+}
+
+x = c/sum(c)
+plot(x = states,y = x, xlab = "Type", ylab = "Limit Distribution")
+```
+
+
+
+```{r}
+type_vs_ext_6 = read.csv("type_vs_ext_6.csv")
+q = type_vs_ext_6$ext_prob
+p = 1-q
+N = (length(q)-1)/2
+
+T_mat = matrix(rep(0,(2*N+1)^2),nrow = 2*N+1)
+states = seq(from = -N, to = N, by = 1)
+
+for (i in states) {
+  bi = b(i)
+  denom = bi+mu+nu+d
+  index = i+N+1 # The row index of T and index of q
+  T_mat[index,index] = (bi/denom)*(1+q[index])
+  
+  if (i == (-N)) {
+    T_mat[index,index+L] = (mu/denom)*p[index+L]/p[index]
+  } else if (i > N-L) {
+    T_mat[index,index-1] = (nu/denom)*p[index-1]/p[index]
+  } else {
+    T_mat[index,index-1] = (nu/denom)*p[index-1]/p[index]
+    T_mat[index,index+L] = (mu/denom)*p[index+L]/p[index]
+  }
+}
+
+for (i in 2:nrow(T_mat)){
+  T_mat[i,i] = T_mat[i,i] + (1-sum(T_mat[i,]))
+}
+
+
+states = states[(1+L):(2*N+1-L)]
+T_mat = T_mat[(1+L):(2*N+1-L),(1+L):(2*N+1-L)]
+
+beta = 1/spectralRadius(T_mat)
+T_hat = diag(nrow(T_mat))-(beta*T_mat)
+c = vector()
+
+for (i in 1:(nrow(T_hat))) {
+  c[i] = abs(det(T_hat[-i,-(N+1)]))
+}
+
+x = c/sum(c)
+plot(x = states,y = x, xlab = "Type", ylab = "Limit Distribution")
+```
+
+
+
+## Plots of Extinction Probabilities
+
+### Driver Dominates
+
+```{r}
+library(gridExtra)
+setwd("C:/Users/Ren-Yi Wang/Desktop/Project/Extinction Probabilities")
+
+type_vs_ext_1 = read.csv("type_vs_ext_1.csv")
+type_vs_ext_2 = read.csv("type_vs_ext_2.csv")
+type_vs_ext_3 = read.csv("type_vs_ext_3.csv")
+
+ 
+gg_ext_prob_2 = ggplot(type_vs_ext_1, aes(x=ini_types, y=ext_prob)) + 
+  geom_point() + xlab("Initial Types")+ylab("Extinction Probability") +
+  ggtitle("Extinction Probabilities for Spec. D2")
+gg_ext_prob_3 = ggplot(type_vs_ext_2, aes(x=ini_types, y=ext_prob)) + 
+  geom_point() + xlab("Initial Types")+ylab("Extinction Probability") +
+  ggtitle("Extinction Probabilities for Spec. D3")
+gg_ext_prob_1 = ggplot(type_vs_ext_3, aes(x=ini_types, y=ext_prob)) + 
+  geom_point() + xlab("Initial Types")+ylab("Extinction Probability") +
+  ggtitle("Extinction Probabilities for Spec. D1")
+grid.arrange(gg_ext_prob_1, gg_ext_prob_2, gg_ext_prob_3, ncol=3)
+
+
+
+grid.arrange(gen_vs_succ_ratio_1, 
+             gen_vs_succ_ratio_2, gen_vs_succ_ratio_3, ncol=2)
+```
+
+
+## Passenger Dominates
+
+```{r}
+type_vs_ext_4 = read.csv("type_vs_ext_4.csv")
+type_vs_ext_5 = read.csv("type_vs_ext_5.csv")
+type_vs_ext_6 = read.csv("type_vs_ext_6.csv")
+
+
+gg_ext_prob_4 = ggplot(type_vs_ext_4, aes(x=ini_types, y=ext_prob)) + 
+  geom_point() + xlab("Initial Types")+ylab("Extinction Probability") +
+  ggtitle("Extinction Probabilities for Spec. P2")
+gg_ext_prob_5 = ggplot(type_vs_ext_5, aes(x=ini_types, y=ext_prob)) + 
+  geom_point() + xlab("Initial Types")+ylab("Extinction Probability") +
+  ggtitle("Extinction Probabilities for Spec. P3")
+gg_ext_prob_6 = ggplot(type_vs_ext_6, aes(x=ini_types, y=ext_prob)) + 
+  geom_point() + xlab("Initial Types")+ylab("Extinction Probability") +
+  ggtitle("Extinction Probabilities for Spec. P1")
+grid.arrange(gg_ext_prob_4, gg_ext_prob_5, gg_ext_prob_6, ncol=2)
+
+grid.arrange(gen_vs_succ_ratio_4, 
+             gen_vs_succ_ratio_5, gen_vs_succ_ratio_6, ncol=2)
+```
+
+
+
+
+
+
+
+

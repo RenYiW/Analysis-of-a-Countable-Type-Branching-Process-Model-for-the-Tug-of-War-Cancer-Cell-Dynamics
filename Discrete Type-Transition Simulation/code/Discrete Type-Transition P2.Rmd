@@ -1,0 +1,159 @@
+---
+title: "Discrete Type Transition P2"
+author: "Ren-Yi Wang"
+date: "9/14/2022"
+output: html_document
+---
+
+## Setup
+
+```{r}
+# rm(list=ls())
+library(ggplot2)
+
+b_0 = 1.15
+mu <- 0.02 # Driver mutation rate
+nu <- 0.3 # Passenger mutation rate
+s_p <- 0.002 # Passenger strength
+L <- 5
+d <- 1 # Death rate
+type_vs_ext = read.csv("C:/Users/ASUS/Desktop/Project/Extinction Probabilities/type_vs_ext_P2.csv")
+ini_type = type_vs_ext$ini_types
+q = type_vs_ext$ext_prob
+
+# Birth rate as a function of type i
+b <- function(i) {
+  return(b_0*( (1+s_p)^i ))
+}
+```
+
+## Discrete Process Simulation
+
+```{r}
+set.seed(104)
+
+# Simulation spec
+S = 1500 # Number of simulations
+Trans = 1200 # Number of Transitions in each simulation
+type_trans = vector()
+
+
+
+for(s in 1:S){
+  # Initialize by a type 0 cell
+  type_trans = rbind(type_trans, c(0,rep(0,(Trans-1))))
+  
+  q_0 = q[which(ini_type == 0)]
+  T_00 = b(0)*(1+q_0)/(b(0)+mu+nu+d)
+  
+  stop = FALSE
+  
+  for(j in 2:Trans){
+    i = type_trans[s,(j-1)] # Current cell type
+    
+    if( ((i+L) > max(ini_type)) | ((i-1) < min(ini_type)) ){
+      stop = TRUE
+      break
+    }
+    
+    q_i = q[which(ini_type == i)]
+    q_ipL = q[which(ini_type == (i+L))]
+    q_im1 = q[which(ini_type == (i-1))]
+    denom = (b(i)+mu+nu+d)
+    adj_fac_r = (1-q_ipL)/(1-q_i)
+    adj_fac_l = (1-q_im1)/(1-q_i)
+    
+    p_r = mu*adj_fac_r/denom # Probability of acquiring a driver
+    p_m = b(i)*(1+q_i)/denom # Probability of no mutation
+    p_l = nu*adj_fac_l/denom # Probability of acquiring a passenger
+    p_normalized = c(p_l,p_m,p_r)/sum( c(p_l,p_m,p_r) ) # In case the sum is not 1
+    
+    action = sample(c(-1,0,L),size = 1, prob = p_normalized)
+    type_trans[s,j] = i + action
+  }
+  
+  if(stop == TRUE){
+    print("Error: Type out of bound")
+    break
+  }
+}
+```
+
+## Plots
+
+```{r}
+Times = seq(0,Trans, length.out = 5)[-1]
+y = array(dim = c(length(Times),S))
+
+for(i in 1:length(Times)){
+  t = Times[i]
+  
+  for(j in 1:S){
+    y[i,j] = type_trans[j,t]
+  }
+}
+
+min_type = min(y)
+max_type = max(y)
+samp_type = min_type:max_type
+type_pop = array(dim=c(length(Times),length(samp_type)))
+type_freq = array(dim=c(length(Times),length(samp_type)))
+
+for(i in 1:nrow(y)){
+  for(j in 1:length(samp_type)){
+    ty = samp_type[j]
+    type_pop[i,j] = sum(y[i,] == ty)
+  }
+}
+
+for(i in 1:nrow(y)){
+  type_freq[i,] = type_pop[i,]/sum(type_pop[i,])
+}
+
+cl = rainbow(length(Times))
+plot(x = samp_type, y = type_freq[1,], 
+     type = "h", col = cl[1], main = paste0("Discrete Type-Transition for Spec. P2, Trans=", Trans),
+     xlab = "Types", ylab = "Frequency", ylim = c(0, max(type_freq)))
+
+legend("topright", legend=as.character(Times), col=cl, 
+       lty=rep(1,4), title="Generation")
+
+for(j in 2:length(Times)){
+  lines(x = samp_type, y = type_freq[j,], 
+        type = "h", col = cl[j])
+}
+```
+
+
+
+
+```{r}
+fitness = array(dim = c(length(Times),S))
+
+for(i in 1:length(Times)){
+  t = Times[i]
+  
+  for(j in 1:S){
+    fitness[i,j] = b(type_trans[j,t])
+  }
+}
+
+ave_fit = rowSums(fitness)/S
+
+cl = rainbow(ncol(fitness))
+
+plot(x = Times, y = ave_fit, type = "l", 
+     xlab = "Generation", ylab = "Average Fitness",
+     main = "Simulated Average Fitness for Spec. P2")
+
+plot(x = Times, y = fitness[,1], type = "l", col = cl[1], 
+     xlab = "Generation", ylab = "Fitness",
+     ylim = c(min(fitness),max(fitness)),
+     main = "Simulated Fitness for Spec. P2")
+for(j in 2:ncol(fitness)){
+  lines(x=Times, y = fitness[,j], type = "l", col = cl[j])
+}
+```
+
+
+
